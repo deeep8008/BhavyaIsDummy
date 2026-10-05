@@ -1,23 +1,61 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Info, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function ForecastChart({ 
   history = [], 
   forecast = [], 
-  todayDate = '2016-04-24', 
   horizonDays = 28, 
   onHorizonChange = null,
   showHorizonSwitch = true,
-  storeName = 'CA_1',
-  productName = 'FOODS_3_090'
+  storeName = 'Default',
+  productName = 'Total Demand',
+  confidenceLevel = '95'
 }) {
   const [hoverIndex, setHoverIndex] = useState(null);
   const [showCI, setShowCI] = useState(true);
+  const [selectedCiLevel, setSelectedCiLevel] = useState(confidenceLevel);
 
-  // Combine visible window: last 45 days of history + forecast
-  const visibleHistory = useMemo(() => {
-    return history.slice(-45);
+  // Normalize historical points
+  const normalizedHistory = useMemo(() => {
+    if (!history || history.length === 0) return [];
+    return history.map(h => ({
+      date: h.date || h.timestamp || '',
+      sales: Number(h.sales !== undefined ? h.sales : h.target !== undefined ? h.target : 0),
+      eventName: h.eventName || null,
+    }));
   }, [history]);
+
+  // Last 60 days of history + forecast
+  const visibleHistory = useMemo(() => {
+    return normalizedHistory.slice(-60);
+  }, [normalizedHistory]);
+
+  // Normalize forecast points
+  const normalizedForecast = useMemo(() => {
+    if (!forecast || forecast.length === 0) return [];
+    return forecast.map(f => {
+      const date = f.date || f.timestamp || '';
+      const pred = Number(f.forecast !== undefined ? f.forecast : f.prediction !== undefined ? f.prediction : 0);
+      const l80 = Number(f.lower_80 !== undefined ? f.lower_80 : f.lower !== undefined ? f.lower : pred * 0.9);
+      const u80 = Number(f.upper_80 !== undefined ? f.upper_80 : f.upper !== undefined ? f.upper : pred * 1.1);
+      const l95 = Number(f.lower_95 !== undefined ? f.lower_95 : f.lower !== undefined ? f.lower : pred * 0.82);
+      const u95 = Number(f.upper_95 !== undefined ? f.upper_95 : f.upper !== undefined ? f.upper : pred * 1.18);
+
+      const activeLower = selectedCiLevel === '80' ? l80 : l95;
+      const activeUpper = selectedCiLevel === '80' ? u80 : u95;
+
+      return {
+        date,
+        forecast: Math.max(0, pred),
+        lower: Math.max(0, activeLower),
+        upper: Math.max(0, activeUpper),
+        lower_80: Math.max(0, l80),
+        upper_80: Math.max(0, u80),
+        lower_95: Math.max(0, l95),
+        upper_95: Math.max(0, u95),
+      };
+    });
+  }, [forecast, selectedCiLevel]);
 
   const allPoints = useMemo(() => {
     const list = [];
@@ -28,25 +66,33 @@ export default function ForecastChart({
         forecast: null,
         lower: null,
         upper: null,
+        lower_80: null,
+        upper_80: null,
+        lower_95: null,
+        upper_95: null,
         isFuture: false,
         eventName: h.eventName
       });
     });
 
-    forecast.forEach(f => {
+    normalizedForecast.forEach(f => {
       list.push({
         date: f.date,
         actual: null,
         forecast: f.forecast,
         lower: f.lower,
         upper: f.upper,
+        lower_80: f.lower_80,
+        upper_80: f.upper_80,
+        lower_95: f.lower_95,
+        upper_95: f.upper_95,
         isFuture: true,
         eventName: null
       });
     });
 
     return list;
-  }, [visibleHistory, forecast]);
+  }, [visibleHistory, normalizedForecast]);
 
   // Chart dimensions & scales
   const width = 860;
@@ -65,8 +111,8 @@ export default function ForecastChart({
     return Math.ceil((max * 1.15) / 10) * 10 || 100;
   }, [allPoints]);
 
-  const getX = (idx) => padding.left + (idx / (allPoints.length - 1 || 1)) * innerWidth;
-  const getY = (val) => padding.top + innerHeight - (val / maxVal) * innerHeight;
+  const getX = (idx) => padding.left + (idx / Math.max(1, allPoints.length - 1)) * innerWidth;
+  const getY = (val) => padding.top + innerHeight - (val / (maxVal || 1)) * innerHeight;
 
   // Build SVG path for actual sales
   const actualPath = useMemo(() => {
@@ -81,38 +127,36 @@ export default function ForecastChart({
 
   // Build SVG path for forecast
   const forecastPath = useMemo(() => {
-    if (forecast.length === 0) return '';
+    if (normalizedForecast.length === 0) return '';
     let d = '';
-    const startIndex = visibleHistory.length - 1;
-    // Connect last actual point to first forecast point for seamless continuity
+    const startIndex = Math.max(0, visibleHistory.length - 1);
     const lastActual = visibleHistory[visibleHistory.length - 1];
     if (lastActual) {
       d += `M ${getX(startIndex)} ${getY(lastActual.sales)}`;
     }
-    forecast.forEach((f, i) => {
+    normalizedForecast.forEach((f, i) => {
       const globalIdx = visibleHistory.length + i;
       const x = getX(globalIdx);
       const y = getY(f.forecast);
       d += !lastActual && i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
     });
     return d;
-  }, [visibleHistory, forecast, maxVal, allPoints.length]);
+  }, [visibleHistory, normalizedForecast, maxVal, allPoints.length]);
 
   // Confidence Interval polygon area
   const ciAreaPath = useMemo(() => {
-    if (!showCI || forecast.length === 0) return '';
+    if (!showCI || normalizedForecast.length === 0) return '';
     const upperPoints = [];
     const lowerPoints = [];
 
-    // Anchor to last actual
-    const startIndex = visibleHistory.length - 1;
+    const startIndex = Math.max(0, visibleHistory.length - 1);
     const lastActual = visibleHistory[visibleHistory.length - 1];
     if (lastActual) {
       upperPoints.push(`${getX(startIndex)},${getY(lastActual.sales)}`);
       lowerPoints.push(`${getX(startIndex)},${getY(lastActual.sales)}`);
     }
 
-    forecast.forEach((f, i) => {
+    normalizedForecast.forEach((f, i) => {
       const globalIdx = visibleHistory.length + i;
       const x = getX(globalIdx);
       upperPoints.push(`${x},${getY(f.upper)}`);
@@ -120,10 +164,11 @@ export default function ForecastChart({
     });
 
     return `M ${upperPoints.join(' L ')} L ${lowerPoints.reverse().join(' L ')} Z`;
-  }, [showCI, visibleHistory, forecast, maxVal, allPoints.length]);
+  }, [showCI, visibleHistory, normalizedForecast, maxVal, allPoints.length]);
 
   // Cutoff marker x position
-  const cutoffX = getX(visibleHistory.length - 1);
+  const cutoffIndex = Math.max(0, visibleHistory.length - 1);
+  const cutoffX = getX(cutoffIndex);
 
   // Active hover point
   const activePoint = hoverIndex !== null ? allPoints[hoverIndex] : null;
@@ -135,38 +180,63 @@ export default function ForecastChart({
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-[#5F5670]">
-              Horizon:
+              Planning Horizon:
             </span>
             <div className="inline-flex p-1 rounded-xl bg-[#F5EFFF] border border-[#E5D9F2]">
-              {[7, 28, 90].map((days) => {
+              {[7, 14, 28, 90].map((days) => {
                 const isActive = horizonDays === days;
                 return (
                   <button
                     key={days}
+                    type="button"
                     onClick={() => onHorizonChange && onHorizonChange(days)}
                     className={`
-                      px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all
+                      px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer
                       ${isActive 
                         ? 'bg-[#A294F9] text-white shadow-xs font-semibold' 
                         : 'text-[#5F5670] hover:text-[#1F1B2C]'
                       }
                     `}
                   >
-                    {days} Days {days === 7 ? '(Short)' : days === 28 ? '(Medium)' : '(Long)'}
+                    {days}D {days === 7 ? '(Short)' : days === 14 ? '(Bi-weekly)' : days === 28 ? '(Medium)' : '(Quarterly)'}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Toggle Confidence Intervals */}
-          <button
-            onClick={() => setShowCI(!showCI)}
-            className="flex items-center gap-1.5 text-xs text-[#5F5670] bg-[#F5EFFF] hover:bg-[#E5D9F2]/60 px-3 py-1.5 rounded-xl border border-[#E5D9F2] transition-colors"
-          >
-            {showCI ? <Eye className="w-3.5 h-3.5 text-[#A294F9]" /> : <EyeOff className="w-3.5 h-3.5" />}
-            <span>Confidence Interval {showCI ? 'Visible' : 'Hidden'}</span>
-          </button>
+          {/* Toggle Confidence Intervals & Level */}
+          <div className="flex items-center gap-2">
+            <div className="inline-flex p-0.5 rounded-xl bg-[#F5EFFF] border border-[#E5D9F2] text-xs">
+              <button
+                type="button"
+                onClick={() => setSelectedCiLevel('80')}
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  selectedCiLevel === '80' ? 'bg-[#CDC1FF] text-[#1F1B2C] font-bold shadow-xs' : 'text-[#5F5670]'
+                }`}
+              >
+                80% Interval
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCiLevel('95')}
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  selectedCiLevel === '95' ? 'bg-[#A294F9] text-white font-bold shadow-xs' : 'text-[#5F5670]'
+                }`}
+              >
+                95% Interval
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowCI(!showCI)}
+              className="flex items-center gap-1.5 text-xs text-[#5F5670] bg-[#F5EFFF] hover:bg-[#E5D9F2]/60 px-3 py-1.5 rounded-xl border border-[#E5D9F2] transition-colors cursor-pointer"
+            >
+              {showCI ? <Eye className="w-3.5 h-3.5 text-[#A294F9]" /> : <EyeOff className="w-3.5 h-3.5" />}
+              <span>{showCI ? 'Intervals On' : 'Intervals Off'}</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -214,14 +284,16 @@ export default function ForecastChart({
           )}
 
           {/* Historical Actuals Line */}
-          <path 
-            d={actualPath} 
-            fill="none" 
-            stroke="#5F5670" 
-            strokeWidth="2" 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-          />
+          {actualPath && (
+            <path 
+              d={actualPath} 
+              fill="none" 
+              stroke="#5F5670" 
+              strokeWidth="2" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+            />
+          )}
 
           {/* Forecast Prediction Line */}
           {forecastPath && (
@@ -230,29 +302,32 @@ export default function ForecastChart({
               fill="none" 
               stroke="#A294F9" 
               strokeWidth="2.5" 
-              strokeDasharray="none"
               strokeLinecap="round" 
               strokeLinejoin="round" 
             />
           )}
 
           {/* Historical vs Forecast Cutoff Boundary */}
-          <line 
-            x1={cutoffX} 
-            y1={padding.top} 
-            x2={cutoffX} 
-            y2={height - padding.bottom} 
-            stroke="#A294F9" 
-            strokeWidth="1.5" 
-            strokeDasharray="4 4" 
-          />
-          <text 
-            x={cutoffX + 6} 
-            y={padding.top + 12} 
-            className="text-[10px] font-semibold fill-[#A294F9]"
-          >
-            Today / Cutoff
-          </text>
+          {visibleHistory.length > 0 && normalizedForecast.length > 0 && (
+            <g>
+              <line 
+                x1={cutoffX} 
+                y1={padding.top} 
+                x2={cutoffX} 
+                y2={height - padding.bottom} 
+                stroke="#A294F9" 
+                strokeWidth="1.5" 
+                strokeDasharray="4 4" 
+              />
+              <text 
+                x={cutoffX + 6} 
+                y={padding.top + 12} 
+                className="text-[10px] font-semibold fill-[#A294F9]"
+              >
+                100% History Cutoff
+              </text>
+            </g>
+          )}
 
           {/* Date Axis Ticks */}
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
@@ -261,7 +336,7 @@ export default function ForecastChart({
               Math.floor((allPoints.length - 1) * ratio)
             );
             const pt = allPoints[idx];
-            if (!pt) return null;
+            if (!pt || !pt.date) return null;
             const x = getX(idx);
             return (
               <text 
@@ -271,7 +346,7 @@ export default function ForecastChart({
                 textAnchor="middle" 
                 className="text-[10px] fill-[#8E83A3] font-medium"
               >
-                {pt.date.slice(5)}
+                {pt.date.length > 5 ? pt.date.slice(5) : pt.date}
               </text>
             );
           })}
@@ -279,12 +354,13 @@ export default function ForecastChart({
           {/* Hover hit detection zones */}
           {allPoints.map((pt, i) => {
             const x = getX(i);
+            const colWidth = innerWidth / Math.max(1, allPoints.length);
             return (
               <rect
                 key={i}
-                x={x - (innerWidth / allPoints.length) / 2}
+                x={x - colWidth / 2}
                 y={padding.top}
-                width={innerWidth / allPoints.length}
+                width={colWidth}
                 height={innerHeight}
                 fill="transparent"
                 onMouseEnter={() => setHoverIndex(i)}
@@ -331,34 +407,34 @@ export default function ForecastChart({
         {/* Floating Tooltip */}
         {hoverIndex !== null && activePoint && (
           <div 
-            className="absolute top-4 right-4 bg-white/95 backdrop-blur-xs border border-[#CDC1FF] rounded-xl p-3 shadow-md text-xs pointer-events-none min-w-[170px]"
+            className="absolute top-4 right-4 bg-white/95 backdrop-blur-xs border border-[#CDC1FF] rounded-xl p-3 shadow-md text-xs pointer-events-none min-w-[180px] z-10"
           >
             <div className="font-semibold text-[#1F1B2C] border-b border-[#F5EFFF] pb-1.5 mb-2 flex items-center justify-between">
               <span>{activePoint.date}</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                 activePoint.isFuture ? 'bg-[#E5D9F2] text-[#A294F9]' : 'bg-gray-100 text-[#5F5670]'
               }`}>
-                {activePoint.isFuture ? 'Forecasted' : 'Historical'}
+                {activePoint.isFuture ? 'Future Projection' : '100% Historical'}
               </span>
             </div>
 
             {activePoint.actual !== null && (
               <div className="flex items-center justify-between text-[#5F5670] mb-1">
                 <span>Actual Demand:</span>
-                <span className="font-bold text-[#1F1B2C]">{activePoint.actual} units</span>
+                <span className="font-bold text-[#1F1B2C]">{Number(activePoint.actual).toFixed(1)} units</span>
               </div>
             )}
 
             {activePoint.forecast !== null && (
               <>
                 <div className="flex items-center justify-between text-[#A294F9] font-medium mb-1">
-                  <span>Forecast:</span>
-                  <span className="font-bold text-[#1F1B2C]">{activePoint.forecast} units</span>
+                  <span>Point Forecast:</span>
+                  <span className="font-bold text-[#1F1B2C]">{Number(activePoint.forecast).toFixed(1)} units</span>
                 </div>
                 {showCI && (
                   <div className="flex items-center justify-between text-[#8E83A3] text-[11px]">
-                    <span>Interval (90%):</span>
-                    <span>[{activePoint.lower} – {activePoint.upper}]</span>
+                    <span>{selectedCiLevel}% Bounds:</span>
+                    <span>[{Number(activePoint.lower).toFixed(1)} – {Number(activePoint.upper).toFixed(1)}]</span>
                   </div>
                 )}
               </>
@@ -378,16 +454,16 @@ export default function ForecastChart({
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-0.5 bg-[#5F5670] rounded-full inline-block"></span>
-            <span>Historical Sales (Daily)</span>
+            <span>Historical Ground Truth</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-0.5 bg-[#A294F9] rounded-full inline-block"></span>
-            <span className="font-medium text-[#1F1B2C]">Predicted Forecast</span>
+            <span className="font-medium text-[#1F1B2C]">Retrained Future Forecast</span>
           </div>
           {showCI && (
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 bg-[#E5D9F2] rounded-xs inline-block border border-[#CDC1FF]/50"></span>
-              <span>Forecast Interval (Uncertainty Range)</span>
+              <span>{selectedCiLevel}% Uncertainty Band</span>
             </div>
           )}
         </div>

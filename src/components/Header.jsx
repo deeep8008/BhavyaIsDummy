@@ -1,48 +1,48 @@
-import React from 'react';
-import { Menu, Bell, Calendar, ChevronDown, Sparkles } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Menu, ChevronDown, LogIn, LogOut, ShieldCheck, Database, Zap } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useDataset } from '../context/DatasetContext';
 
 export default function Header({ activeTab, onMobileToggle }) {
-  const getPageInfo = (tab) => {
-    switch (tab) {
-      case 'home':
-        return {
-          title: 'Overview',
-          breadcrumb: 'ForecastIQ / Enterprise Demand Planning'
-        };
-      case 'explorer':
-        return {
-          title: 'Data Explorer',
-          breadcrumb: 'ForecastIQ / M5 Dataset Understanding'
-        };
-      case 'forecast':
-        return {
-          title: 'Generate Forecast',
-          breadcrumb: 'ForecastIQ / Multi-Horizon Inference'
-        };
-      case 'comparison':
-        return {
-          title: 'Model Comparison',
-          breadcrumb: 'ForecastIQ / Benchmark Across Horizons'
-        };
-      case 'evaluation':
-        return {
-          title: 'Evaluation & Backtesting',
-          breadcrumb: 'ForecastIQ / Error Diagnostics (MAPE & RMSE)'
-        };
-      case 'insights':
-        return {
-          title: 'Business Insights',
-          breadcrumb: 'ForecastIQ / Decision Support & Planning'
-        };
-      default:
-        return {
-          title: 'ForecastIQ',
-          breadcrumb: 'Multi-Horizon Time-Series Forecasting'
-        };
+  const { user, isAuthenticated, signOut, openAuthModal } = useAuth();
+  const { activeDatasetId, datasetSummary, backendOnline } = useDataset();
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setProfileDropdownOpen(false);
+      }
     }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const getPageInfo = (tab) => {
+    if (tab === 'home') {
+      return {
+        title: 'Welcome to ForecastIQ',
+        breadcrumb: 'ForecastIQ / Enterprise Demand Intelligence'
+      };
+    }
+    return {
+      title: 'Generate Forecast & Model Leaderboard',
+      breadcrumb: 'ForecastIQ / Backtest 5 Models & Project Horizon'
+    };
   };
 
   const { title, breadcrumb } = getPageInfo(activeTab);
+
+  const getInitials = (name) => {
+    if (!name) return 'EP';
+    return name
+      .split(' ')
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  };
 
   return (
     <header className="sticky top-0 z-30 bg-[#F5EFFF]/90 backdrop-blur-md border-b border-[#E5D9F2]/60 px-6 py-4">
@@ -69,37 +69,81 @@ export default function Header({ activeTab, onMobileToggle }) {
 
         {/* Right: Controls & Profile */}
         <div className="flex items-center gap-3">
-          {/* Baseline Context selector */}
-          <div className="hidden md:flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-[#E5D9F2] shadow-xs text-xs text-[#5F5670]">
-            <Calendar className="w-3.5 h-3.5 text-[#A294F9]" />
-            <span className="font-medium text-[#1F1B2C]">Cutoff: Day 1913</span>
-            <span className="text-[#CDC1FF]">•</span>
-            <span>2016-04-24</span>
+          {/* Active Dataset Badge */}
+          <div className="hidden md:flex items-center gap-2 bg-white px-3.5 py-1.5 rounded-xl border border-[#E5D9F2] shadow-xs text-xs text-[#5F5670]">
+            <Database className="w-3.5 h-3.5 text-[#A294F9]" />
+            <span className="font-semibold text-[#1F1B2C] max-w-[140px] truncate">
+              {datasetSummary?.dataset_name || activeDatasetId}
+            </span>
           </div>
 
-          {/* Quick Notification */}
-          <button 
-            className="relative p-2 rounded-xl bg-white border border-[#E5D9F2] text-[#5F5670] hover:text-[#1F1B2C] hover:border-[#CDC1FF] shadow-xs transition-colors"
-            title="System alerts: 0 critical, models validated"
+          {/* Backend Status indicator */}
+          <div 
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold border ${
+              backendOnline ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}
           >
-            <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#A294F9]"></span>
-          </button>
-
-          {/* User / Planner Avatar */}
-          <div className="flex items-center gap-2.5 pl-2">
-            <div className="w-8 h-8 rounded-full bg-[#E5D9F2] text-[#1F1B2C] font-semibold text-xs flex items-center justify-center border border-[#CDC1FF]">
-              EP
-            </div>
-            <div className="hidden sm:block text-left">
-              <div className="text-xs font-semibold text-[#1F1B2C] leading-none">
-                Enterprise Planner
-              </div>
-              <div className="text-[10px] text-[#8E83A3] mt-0.5">
-                Supply Chain Analytics
-              </div>
-            </div>
+            <span className={`w-1.5 h-1.5 rounded-full ${backendOnline ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+            <span>{backendOnline ? 'ML Backend Online' : 'Backend Connecting'}</span>
           </div>
+
+          {/* User Profile / Auth Area */}
+          {isAuthenticated && user ? (
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                className="flex items-center gap-2.5 p-1.5 rounded-2xl hover:bg-white border border-transparent hover:border-[#E5D9F2] transition-all cursor-pointer"
+              >
+                <div className="w-8 h-8 rounded-full bg-[#E5D9F2] text-[#1F1B2C] font-semibold text-xs flex items-center justify-center border border-[#CDC1FF]">
+                  {getInitials(user.name)}
+                </div>
+                <div className="hidden sm:block text-left">
+                  <div className="text-xs font-semibold text-[#1F1B2C] leading-none">
+                    {user.name}
+                  </div>
+                  <div className="text-[10px] text-[#8E83A3] mt-0.5">
+                    {user.role || 'Enterprise Planner'}
+                  </div>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-[#8E83A3] hidden sm:block" />
+              </button>
+
+              {/* Profile Dropdown Menu */}
+              {profileDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-[#E5D9F2] p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="p-3 border-b border-[#F5EFFF] bg-[#F5EFFF]/40 rounded-xl mb-1">
+                    <p className="text-xs font-bold text-[#1F1B2C]">{user.name}</p>
+                    <p className="text-[11px] text-[#8E83A3] truncate">{user.email}</p>
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#CDC1FF]/30 text-[#1F1B2C] text-[10px] font-medium">
+                      <ShieldCheck className="w-3 h-3 text-[#A294F9]" />
+                      <span>{user.role}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setProfileDropdownOpen(false);
+                      signOut();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => openAuthModal('signin')}
+                className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-[#1F1B2C] bg-white border border-[#CDC1FF] rounded-xl hover:bg-[#F5EFFF] shadow-xs transition-all cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5 text-[#A294F9]" />
+                <span>Sign In</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

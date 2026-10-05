@@ -1,476 +1,942 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
-  Check, 
+  Upload, 
+  FolderUp, 
+  FileSpreadsheet, 
   Sparkles, 
   ArrowRight, 
-  Calendar, 
-  Clock, 
+  Check, 
+  Database, 
+  Lock, 
   Cpu, 
-  Store, 
-  RotateCcw, 
-  BarChart2, 
+  Target, 
   TrendingUp, 
-  ChevronRight,
-  ShieldCheck,
-  CheckCircle2
+  Download, 
+  Play, 
+  AlertCircle,
+  Scissors,
+  CheckCircle2,
+  Calendar,
+  Layers,
+  Zap
 } from 'lucide-react';
 import ForecastChart from '../components/ForecastChart';
-import { 
-  STORES, 
-  PRODUCTS, 
-  MODELS, 
-  HORIZONS, 
-  generateTimeSeries 
-} from '../data/mockData';
+import { useDataset } from '../context/DatasetContext';
+
+const modelColors = {
+  arima: '#3B82F6',
+  prophet: '#10B981',
+  lightgbm: '#F59E0B',
+  deepar: '#8B5CF6',
+  tft: '#EC4899',
+  ARIMA: '#3B82F6',
+  Prophet: '#10B981',
+  LightGBM: '#F59E0B',
+  DeepAR: '#8B5CF6',
+  TFT: '#EC4899',
+};
 
 export default function GenerateForecastPage({ onNavigate }) {
-  const [storeId, setStoreId] = useState('CA_1');
-  const [productId, setProductId] = useState('FOODS_3_090');
-  const [horizonDays, setHorizonDays] = useState(28);
-  const [modelId, setModelId] = useState('tft');
+  const { 
+    activeDatasetId, 
+    datasetSummary, 
+    benchmarkResults, 
+    selectedModel, 
+    setSelectedModel, 
+    selectedHorizon, 
+    setSelectedHorizon, 
+    selectedSeriesId, 
+    setSelectedSeriesId,
+    currentInventory,
+    setCurrentInventory,
+    forecastResult, 
+    uploadFiles,
+    mapAndProcessSchema,
+    preloadM5Dataset,
+    uploadPreview,
+    setUploadPreview,
+    runBenchmark,
+    runFutureForecast, 
+    exportForecastToCsv,
+    isLoading,
+    loadingMessage,
+    error,
+    clearError,
+    backendOnline
+  } = useDataset();
 
-  // Generation execution state
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationStep, setGenerationStep] = useState(0); // 0 to 4
-  const [forecastResult, setForecastResult] = useState(null);
+  // Local Upload State
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [datasetName, setDatasetName] = useState('');
+  const [uploadWarning, setUploadWarning] = useState('');
+  const [dragActive, setDragActive] = useState(false);
 
-  const stepsList = [
-    'Preparing data from M5 product-store series...',
-    'Preparing forecasting features (lags, rolling stats, calendar & price)...',
-    'Generating multi-horizon predictions with selected architecture...',
-    'Preparing results and confidence intervals...'
-  ];
+  // Column Mapping State
+  const [timeCol, setTimeCol] = useState('');
+  const [targetCol, setTargetCol] = useState('');
+  const [seriesCol, setSeriesCol] = useState('');
 
-  const handleStartForecast = () => {
-    setIsGenerating(true);
-    setGenerationStep(0);
-    setForecastResult(null);
+  // Future Forecast Options
+  const [localHorizon, setLocalHorizon] = useState(selectedHorizon || 28);
+  const [localInventory, setLocalInventory] = useState(currentInventory || '');
 
-    // Sequential clean progress without fake percentages
-    setTimeout(() => {
-      setGenerationStep(1);
-      setTimeout(() => {
-        setGenerationStep(2);
-        setTimeout(() => {
-          setGenerationStep(3);
-          setTimeout(() => {
-            const result = generateTimeSeries(storeId, productId, modelId, horizonDays);
-            setForecastResult(result);
-            setIsGenerating(false);
-          }, 450);
-        }, 500);
-      }, 500);
-    }, 450);
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+
+  // --- Handlers for File & Folder Upload ---
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
   };
 
-  // Horizon switching in the result view without restarting the flow
-  const handleHorizonSwitch = (newDays) => {
-    setHorizonDays(newDays);
-    const updated = generateTimeSeries(storeId, productId, modelId, newDays);
-    setForecastResult(updated);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processSelectedFiles(Array.from(e.dataTransfer.files));
+    }
   };
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processSelectedFiles(Array.from(e.target.files));
+    }
+  };
+
+  const processSelectedFiles = (files) => {
+    setUploadWarning('');
+    clearError();
+    const csvFiles = files.filter(f => f.name.toLowerCase().endsWith('.csv'));
+    if (csvFiles.length === 0) {
+      setUploadWarning('⚠️ No .csv files found in your selection. Please select one or more .csv files.');
+      setSelectedFiles([]);
+      return;
+    }
+    setSelectedFiles(files);
+    if (!datasetName && files.length > 0) {
+      const base = files[0].name.replace(/\.[^/.]+$/, "");
+      setDatasetName(base);
+    }
+  };
+
+  const handleUploadSubmit = async () => {
+    if (selectedFiles.length === 0) {
+      setUploadWarning('Please select at least one CSV file first.');
+      return;
+    }
+    try {
+      const preview = await uploadFiles(selectedFiles, datasetName);
+      if (preview && preview.available_columns) {
+        const cols = preview.available_columns;
+        const autoTime = cols.find(c => /date|time|timestamp|day|d$/i.test(c)) || cols[0] || '';
+        const autoTarget = cols.find(c => /sales|target|units|demand|volume|qty/i.test(c)) || (cols.length > 1 ? cols[1] : '');
+        const autoSeries = cols.find(c => /series|item_id|store_id|product|id$/i.test(c)) || '';
+
+        setTimeCol(autoTime);
+        setTargetCol(autoTarget);
+        setSeriesCol(autoSeries);
+      }
+    } catch {
+      // Error handled in context
+    }
+  };
+
+  const handleConfirmMapping = async () => {
+    if (!timeCol || !targetCol) {
+      setUploadWarning('Please select both a Timestamp column and a Target demand column.');
+      return;
+    }
+    try {
+      await mapAndProcessSchema({
+        dataset_id: uploadPreview.dataset_id,
+        time_column: timeCol,
+        target_column: targetCol,
+        series_id_column: seriesCol ? seriesCol : null,
+        dynamic_covariates: [],
+        static_covariates: []
+      });
+      setSelectedFiles([]);
+      setUploadPreview(null);
+    } catch {
+      // Error handled in context
+    }
+  };
+
+  const handlePreloadM5 = async () => {
+    try {
+      await preloadM5Dataset('total', 500);
+      setSelectedFiles([]);
+      setUploadPreview(null);
+    } catch {
+      // Error handled in context
+    }
+  };
+
+  // --- Handlers for Backtesting Benchmark ---
+  const handleRunBenchmark = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    try {
+      await runBenchmark();
+    } catch (err) {
+      console.error('Benchmark execution error:', err);
+    }
+  };
+
+  // --- Handlers for Future Forecasting ---
+  const handleExecuteFutureForecast = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setSelectedHorizon(localHorizon);
+    setCurrentInventory(localInventory);
+    try {
+      await runFutureForecast(selectedModel, localHorizon, selectedSeriesId, localInventory);
+    } catch (err) {
+      console.error('Future forecast execution error:', err);
+    }
+  };
+
+  // Chart data formatting
+  const chartHistory = useMemo(() => {
+    if (datasetSummary?.sample_records && Array.isArray(datasetSummary.sample_records)) {
+      return datasetSummary.sample_records.map(r => ({
+        date: r.timestamp || '',
+        sales: Number(r.target || 0),
+      }));
+    }
+    return [];
+  }, [datasetSummary]);
+
+  const leaderboard = benchmarkResults?.leaderboard || [];
+  const testActuals = benchmarkResults?.test_actuals || [];
+  const testTimestamps = benchmarkResults?.test_timestamps || [];
+  const modelPredictions = benchmarkResults?.model_predictions || {};
+  const splitInfo = benchmarkResults?.split_info;
+
+  // Chart max
+  const chartMax = useMemo(() => {
+    let max = 0;
+    testActuals.forEach(v => { if (v > max) max = v; });
+    Object.values(modelPredictions).forEach(preds => {
+      preds.forEach(v => { if (v > max) max = v; });
+    });
+    return Math.ceil((max * 1.15) / 10) * 10 || 100;
+  }, [testActuals, modelPredictions]);
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto pb-12">
-      {/* Header */}
+    <div className="space-y-10 max-w-6xl mx-auto pb-16">
+      {/* Title */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider text-[#8E83A3]">
-          Inference Engine
+          End-to-End Demand Pipeline
         </div>
         <h1 className="text-3xl font-bold font-heading text-[#1F1B2C]">
-          Generate a Forecast
+          Generate Forecast & Model Evaluation
         </h1>
         <p className="text-sm text-[#5F5670] mt-1 max-w-2xl">
-          Choose what you want to forecast across store tiers, products, multi-step planning horizons, and model architectures.
+          Upload any time-series dataset, evaluate all 5 models chronologically on hidden test data, and retrain on 100% of historical data to project future demand.
         </p>
       </div>
 
-      {/* Main Configuration Steps Container */}
-      {!forecastResult && !isGenerating && (
-        <div className="space-y-6">
-          <div className="p-6 lg:p-8 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-8">
-            {/* Step 1 & Step 2 Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Step 1: Select Store */}
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-[#A294F9] text-white text-[11px] font-bold flex items-center justify-center">
-                    1
-                  </span>
-                  <label className="text-sm font-bold font-heading text-[#1F1B2C]">
-                    Select Store
-                  </label>
-                </div>
-                <select
-                  value={storeId}
-                  onChange={(e) => setStoreId(e.target.value)}
-                  className="w-full bg-[#F5EFFF] border border-[#CDC1FF] rounded-2xl px-4 py-3 text-sm font-semibold text-[#1F1B2C] outline-none hover:border-[#A294F9] transition-colors"
-                >
-                  {STORES.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.id})
-                    </option>
-                  ))}
-                </select>
-                <div className="text-[11px] text-[#8E83A3]">
-                  Selected store feeds historical velocity and state calendar holiday mappings.
-                </div>
-              </div>
-
-              {/* Step 2: Select Product */}
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-[#A294F9] text-white text-[11px] font-bold flex items-center justify-center">
-                    2
-                  </span>
-                  <label className="text-sm font-bold font-heading text-[#1F1B2C]">
-                    Select Product / Category
-                  </label>
-                </div>
-                <select
-                  value={productId}
-                  onChange={(e) => setProductId(e.target.value)}
-                  className="w-full bg-[#F5EFFF] border border-[#CDC1FF] rounded-2xl px-4 py-3 text-sm font-semibold text-[#1F1B2C] outline-none hover:border-[#A294F9] transition-colors"
-                >
-                  {PRODUCTS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      [{p.category}] {p.id} — {p.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="text-[11px] text-[#8E83A3]">
-                  Search across Food staples, Hobbies, or Household consumables.
-                </div>
-              </div>
-            </div>
-
-            {/* Step 3: Select Forecast Horizon */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-[#A294F9] text-white text-[11px] font-bold flex items-center justify-center">
-                  3
-                </span>
-                <label className="text-sm font-bold font-heading text-[#1F1B2C]">
-                  Select Forecast Horizon
-                </label>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {HORIZONS.map((h) => {
-                  const isSelected = horizonDays === h.days;
-                  return (
-                    <div
-                      key={h.id}
-                      onClick={() => setHorizonDays(h.days)}
-                      className={`
-                        p-5 rounded-2xl border cursor-pointer transition-all relative
-                        ${isSelected 
-                          ? 'bg-[#F5EFFF] border-[#A294F9] shadow-sm ring-1 ring-[#A294F9]' 
-                          : 'bg-white border-[#E5D9F2] hover:border-[#CDC1FF]'
-                        }
-                      `}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-                          isSelected ? 'bg-[#A294F9] text-white' : 'bg-[#E5D9F2]/70 text-[#5F5670]'
-                        }`}>
-                          {h.term}
-                        </span>
-                        {isSelected && (
-                          <div className="w-5 h-5 rounded-full bg-[#A294F9] text-white flex items-center justify-center">
-                            <Check className="w-3.5 h-3.5" />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="text-2xl font-extrabold font-heading text-[#1F1B2C] mt-3">
-                        {h.label}
-                      </div>
-
-                      <p className="text-xs text-[#5F5670] mt-1.5 leading-relaxed">
-                        {h.focus}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Step 4: Select Model */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-[#A294F9] text-white text-[11px] font-bold flex items-center justify-center">
-                  4
-                </span>
-                <label className="text-sm font-bold font-heading text-[#1F1B2C]">
-                  Select Model
-                </label>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {MODELS.map((m) => {
-                  const isSelected = modelId === m.id;
-                  return (
-                    <div
-                      key={m.id}
-                      onClick={() => setModelId(m.id)}
-                      className={`
-                        p-4 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between
-                        ${isSelected 
-                          ? 'bg-[#F5EFFF] border-[#A294F9] shadow-sm ring-1 ring-[#A294F9]' 
-                          : 'bg-white border-[#E5D9F2] hover:border-[#CDC1FF]'
-                        }
-                      `}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[10px] uppercase font-bold tracking-wider text-[#8E83A3]">
-                            {m.type}
-                          </span>
-                          {isSelected && (
-                            <span className="w-4 h-4 rounded-full bg-[#A294F9] text-white flex items-center justify-center">
-                              <Check className="w-2.5 h-2.5" />
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="text-sm font-bold font-heading text-[#1F1B2C]">
-                          {m.name}
-                        </div>
-
-                        <p className="text-[11px] text-[#5F5670] mt-1 line-clamp-2 leading-relaxed">
-                          {m.description}
-                        </p>
-                      </div>
-
-                      <div className="mt-3 pt-2 border-t border-[#E5D9F2]/70 flex items-center justify-between text-[10px] text-[#8E83A3]">
-                        <span>{m.framework}</span>
-                        <span className="font-semibold text-[#A294F9]">{m.tag}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Primary Action Button */}
-            <div className="pt-4 flex items-center justify-end">
-              <button
-                onClick={handleStartForecast}
-                className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-[#A294F9] text-white font-bold text-sm hover:bg-[#9181f7] shadow-sm hover:shadow transition-all flex items-center justify-center gap-2"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Generate Forecast</span>
-              </button>
-            </div>
+      {/* Global Alerts */}
+      {(error || uploadWarning) && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{error || uploadWarning}</span>
           </div>
+          <button 
+            type="button"
+            onClick={() => { clearError(); setUploadWarning(''); }}
+            className="text-rose-600 hover:text-rose-900 font-bold"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Elegant Progress State (No Fake Percentages) */}
-      {isGenerating && (
-        <div className="p-12 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs text-center max-w-xl mx-auto space-y-6 my-8">
-          <div className="w-16 h-16 mx-auto rounded-3xl bg-[#F5EFFF] border border-[#CDC1FF] flex items-center justify-center text-[#A294F9]">
-            <Sparkles className="w-8 h-8 animate-pulse" />
-          </div>
-
+      {/* ========================================================================= */}
+      {/* SECTION 1: UPLOAD DATASET OR FOLDER */}
+      {/* ========================================================================= */}
+      <section className="p-6 sm:p-8 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F5EFFF]">
           <div>
-            <h3 className="text-xl font-bold font-heading text-[#1F1B2C]">
-              Generating Forecast...
-            </h3>
-            <p className="text-xs text-[#5F5670] mt-1">
-              Executing pipeline for {storeId} • {productId} across {horizonDays} days.
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#A294F9]">
+              Step 1
+            </div>
+            <h2 className="text-xl font-bold font-heading text-[#1F1B2C]">
+              Upload Dataset or Multi-CSV Folder
+            </h2>
+            <p className="text-xs text-[#5F5670]">
+              Upload a single CSV file, an entire folder of CSVs, or preload the reference M5 benchmark.
             </p>
           </div>
 
-          {/* Sequential Step Badges */}
-          <div className="space-y-2.5 text-left max-w-md mx-auto">
-            {stepsList.map((stepText, idx) => {
-              const isDone = generationStep > idx;
-              const isCurrent = generationStep === idx;
-              return (
-                <div
-                  key={idx}
-                  className={`flex items-center gap-3 p-3 rounded-xl border text-xs transition-all ${
-                    isDone 
-                      ? 'bg-[#F5EFFF] border-[#CDC1FF] text-[#1F1B2C] font-medium' 
-                      : isCurrent 
-                        ? 'bg-white border-[#A294F9] text-[#A294F9] font-bold shadow-xs' 
-                        : 'bg-gray-50 border-gray-100 text-[#8E83A3]'
+          <button
+            type="button"
+            onClick={handlePreloadM5}
+            disabled={isLoading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F5EFFF] text-[#A294F9] border border-[#CDC1FF] text-xs font-bold hover:bg-[#E5D9F2] shadow-xs transition-colors cursor-pointer shrink-0"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>1-Click Load M5 Benchmark</span>
+          </button>
+        </div>
+
+        {/* Upload Dropzone */}
+        {!uploadPreview && (
+          <div className="space-y-4">
+            <div
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+              className={`p-8 border-2 border-dashed rounded-3xl text-center transition-all ${
+                dragActive 
+                  ? 'border-[#A294F9] bg-[#F5EFFF]' 
+                  : 'border-[#CDC1FF] bg-[#F5EFFF]/30 hover:bg-[#F5EFFF]/60'
+              }`}
+            >
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-white text-[#A294F9] border border-[#CDC1FF] flex items-center justify-center shadow-xs mb-3">
+                <Upload className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-bold text-[#1F1B2C]">
+                Drag and drop CSV file(s) or entire dataset folder
+              </h3>
+              <p className="text-xs text-[#5F5670] mt-1 max-w-sm mx-auto">
+                Supports single-CSV sales time-series or multi-file directories. Non-CSV files are safely excluded.
+              </p>
+
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 rounded-xl bg-white border border-[#CDC1FF] text-xs font-semibold text-[#1F1B2C] hover:bg-[#F5EFFF] shadow-xs cursor-pointer flex items-center gap-2"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-[#A294F9]" />
+                  <span>Choose CSV File(s)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="px-4 py-2 rounded-xl bg-white border border-[#CDC1FF] text-xs font-semibold text-[#1F1B2C] hover:bg-[#F5EFFF] shadow-xs cursor-pointer flex items-center gap-2"
+                >
+                  <FolderUp className="w-4 h-4 text-[#A294F9]" />
+                  <span>Choose Folder</span>
+                </button>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".csv"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  webkitdirectory="true"
+                  directory="true"
+                  multiple
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
+            {/* Selected files preview */}
+            {selectedFiles.length > 0 && (
+              <div className="p-4 rounded-2xl bg-[#F5EFFF] border border-[#E5D9F2] space-y-3">
+                <div className="flex items-center justify-between text-xs font-semibold text-[#1F1B2C]">
+                  <span>Files Selected: {selectedFiles.length}</span>
+                  <span className="text-emerald-700 font-bold">
+                    {selectedFiles.filter(f => f.name.endsWith('.csv')).length} valid CSV file(s)
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="text"
+                    placeholder="Dataset Name (optional)"
+                    value={datasetName}
+                    onChange={(e) => setDatasetName(e.target.value)}
+                    className="flex-1 min-w-[200px] bg-white border border-[#CDC1FF] rounded-xl px-3 py-2 text-xs font-semibold text-[#1F1B2C] outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUploadSubmit}
+                    disabled={isLoading}
+                    className="px-5 py-2 rounded-xl bg-[#A294F9] text-white text-xs font-bold hover:bg-[#9181f7] shadow-xs cursor-pointer flex items-center gap-2"
+                  >
+                    <span>Upload & Map Columns</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Column Mapping Interface */}
+        {uploadPreview && (
+          <div className="space-y-4 p-5 rounded-2xl bg-[#F5EFFF]/50 border border-[#CDC1FF]">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-[#1F1B2C]">
+                  Map Columns for: {uploadPreview.dataset_name}
+                </div>
+                <div className="text-[11px] text-[#5F5670]">
+                  Detected Type: {uploadPreview.detected_type} • Total Rows: {Number(uploadPreview.total_raw_rows).toLocaleString()}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUploadPreview(null)}
+                className="text-xs text-[#8E83A3] hover:text-[#1F1B2C] underline"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-[#1F1B2C] mb-1">
+                  1. Timestamp Column *
+                </label>
+                <select
+                  value={timeCol}
+                  onChange={(e) => setTimeCol(e.target.value)}
+                  className="w-full bg-white border border-[#CDC1FF] rounded-xl px-3 py-2 text-xs font-semibold text-[#1F1B2C] outline-none"
+                >
+                  <option value="">Select timestamp column...</option>
+                  {uploadPreview.available_columns.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#1F1B2C] mb-1">
+                  2. Target Demand Column *
+                </label>
+                <select
+                  value={targetCol}
+                  onChange={(e) => setTargetCol(e.target.value)}
+                  className="w-full bg-white border border-[#CDC1FF] rounded-xl px-3 py-2 text-xs font-semibold text-[#1F1B2C] outline-none"
+                >
+                  <option value="">Select target column...</option>
+                  {uploadPreview.available_columns.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#1F1B2C] mb-1">
+                  3. Series ID Column (Optional)
+                </label>
+                <select
+                  value={seriesCol}
+                  onChange={(e) => setSeriesCol(e.target.value)}
+                  className="w-full bg-white border border-[#CDC1FF] rounded-xl px-3 py-2 text-xs font-semibold text-[#1F1B2C] outline-none"
+                >
+                  <option value="">None (Single Series / Total)</option>
+                  {uploadPreview.available_columns.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={handleConfirmMapping}
+                disabled={isLoading}
+                className="px-6 py-2.5 rounded-xl bg-[#A294F9] text-white text-xs font-bold hover:bg-[#9181f7] shadow-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Confirm & Standardize Dataset</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Current Active Dataset Summary Badge */}
+        {datasetSummary && (
+          <div className="p-4 rounded-2xl bg-[#F5EFFF] border border-[#E5D9F2] flex flex-wrap items-center justify-between gap-4 text-xs">
+            <div className="space-y-0.5">
+              <div className="font-bold text-[#1F1B2C] flex items-center gap-2">
+                <Database className="w-4 h-4 text-[#A294F9]" />
+                <span>Loaded Dataset: {datasetSummary.dataset_name}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                  Canonical Parquet Ready
+                </span>
+              </div>
+              <div className="text-[11px] text-[#5F5670]">
+                {Number(datasetSummary.total_observations).toLocaleString()} historical observations • {datasetSummary.series_count} time series • {datasetSummary.start_date} to {datasetSummary.end_date}
+              </div>
+            </div>
+
+            {datasetSummary.series_ids?.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[#8E83A3]">Active Series ID:</span>
+                <select
+                  value={selectedSeriesId || ''}
+                  onChange={(e) => setSelectedSeriesId(e.target.value)}
+                  className="bg-white border border-[#CDC1FF] rounded-xl px-3 py-1.5 text-xs font-semibold text-[#1F1B2C] outline-none cursor-pointer"
+                >
+                  {datasetSummary.series_ids.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ========================================================================= */}
+      {/* SECTION 2: CHRONOLOGICAL BACKTESTING & EVALUATION (10-STEP ENGINE) */}
+      {/* ========================================================================= */}
+      <section className="p-6 sm:p-8 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F5EFFF]">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#A294F9]">
+              Step 2
+            </div>
+            <h2 className="text-xl font-bold font-heading text-[#1F1B2C]">
+              Chronological Backtesting & Model Evaluation
+            </h2>
+            <p className="text-xs text-[#5F5670]">
+              First 80% used for model training. The remaining 20% is strictly hidden as holdout test data to calculate real MAPE and RMSE.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRunBenchmark}
+            disabled={isLoading || !backendOnline}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-[#A294F9] text-white text-xs font-bold hover:bg-[#9181f7] shadow-sm hover:shadow transition-all cursor-pointer shrink-0"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{isLoading ? 'Evaluating 5 Models...' : 'Evaluate Models'}</span>
+          </button>
+        </div>
+
+        {/* 80/20 Chronological Rule Card */}
+        <div className="p-4 rounded-2xl bg-[#F5EFFF]/70 border border-[#CDC1FF] space-y-2 text-xs">
+          <div className="flex items-center justify-between text-[#1F1B2C] font-bold">
+            <span className="flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-[#A294F9]" />
+              <span>Chronological 80/20 Holdout Rule: Zero Data Leakage</span>
+            </span>
+            <span className="text-[11px] text-emerald-700 font-semibold">
+              {splitInfo ? `${splitInfo.train_observations} Train / ${splitInfo.test_observations} Test Steps` : '80% Train / 20% Test'}
+            </span>
+          </div>
+
+          <div className="w-full flex h-6 rounded-xl overflow-hidden border border-[#CDC1FF] text-[10px] font-bold">
+            <div className="bg-[#E5D9F2] text-[#5F5670] flex items-center justify-center w-[80%]">
+              1. Training Period (First 80%) — Models Learn Parameters
+            </div>
+            <div className="bg-[#A294F9] text-white flex items-center justify-center w-[20%]">
+              2. Hidden Test (Last 20%)
+            </div>
+          </div>
+
+          <p className="text-[11px] text-[#5F5670] leading-relaxed">
+            The candidate models (ARIMA, Prophet, LightGBM, DeepAR, TFT) are fitted strictly on the first 80 days. They predict the remaining 20 days. Their predictions are compared against the known actuals to compute exact MAPE and RMSE.
+          </p>
+        </div>
+
+        {/* Live Loading Progress State */}
+        {isLoading && (
+          <div className="p-6 rounded-2xl bg-[#F5EFFF] border border-[#CDC1FF] flex items-center gap-4 animate-pulse">
+            <div className="w-8 h-8 rounded-xl bg-[#A294F9] text-white flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 animate-spin" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-[#1F1B2C]">
+                {loadingMessage || 'Training & Evaluating 5 Candidate Models...'}
+              </div>
+              <div className="text-xs text-[#5F5670]">
+                Running ARIMA, Prophet, LightGBM, DeepAR, and TFT chronologically on the hidden 20-day test set. Calculating MAPE & RMSE...
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Leaderboard Table */}
+        {leaderboard.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-[#1F1B2C]">
+                Candidate Model Evaluation Leaderboard (Lower Error is Better)
+              </h3>
+              <span className="text-xs text-[#8E83A3]">
+                Ranked by: <strong>Primary: MAPE %</strong>, Tie-Breaker: <strong>RMSE</strong>
+              </span>
+            </div>
+
+            <div className="overflow-x-auto border border-[#E5D9F2] rounded-2xl">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-[#F5EFFF] text-[#8E83A3] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">Rank</th>
+                    <th className="py-3 px-4 font-semibold">Candidate Model</th>
+                    <th className="py-3 px-4 font-semibold">Architecture Class</th>
+                    <th className="py-3 px-4 font-semibold">Backtested MAPE (%)</th>
+                    <th className="py-3 px-4 font-semibold">RMSE (Units)</th>
+                    <th className="py-3 px-4 font-semibold">Training Time</th>
+                    <th className="py-3 px-4 font-semibold text-right">Selection for Future Forecast</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#F5EFFF]">
+                  {leaderboard.map((row) => {
+                    const isWinner = row.rank === 1;
+                    const isSelected = selectedModel === row.model_key;
+                    return (
+                      <tr 
+                        key={row.model_key} 
+                        className={`transition-colors ${
+                          isSelected ? 'bg-[#F5EFFF]/80' : 'hover:bg-[#F5EFFF]/30'
+                        }`}
+                      >
+                        <td className="py-3.5 px-4">
+                          <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
+                            isWinner 
+                              ? 'bg-[#A294F9] text-white shadow-xs' 
+                              : 'bg-[#E5D9F2] text-[#5F5670]'
+                          }`}>
+                            #{row.rank}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-[#1F1B2C]">
+                          <div className="flex items-center gap-2">
+                            <span 
+                              className="w-2.5 h-2.5 rounded-full inline-block"
+                              style={{ backgroundColor: modelColors[row.model_key] || '#A294F9' }}
+                            />
+                            <span>{row.model_name}</span>
+                            {isWinner && (
+                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                                #1 WINNER
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-[#5F5670]">
+                          {row.model_type}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-[#1F1B2C]">
+                          <span className={isWinner ? 'text-emerald-700 font-extrabold text-sm' : ''}>
+                            {row.mape.toFixed(2)}%
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-[#1F1B2C]">
+                          {row.rmse.toFixed(2)}
+                        </td>
+                        <td className="py-3.5 px-4 text-[#8E83A3] font-mono">
+                          {row.train_time_seconds.toFixed(2)}s
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedModel(row.model_key)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#A294F9] text-white shadow-xs'
+                                : 'bg-white border border-[#CDC1FF] text-[#1F1B2C] hover:bg-[#F5EFFF]'
+                            }`}
+                          >
+                            {isSelected ? 'Selected Model ✓' : 'Select for Forecast'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Holdout Comparison Chart */}
+            {testActuals.length > 0 && (
+              <div className="pt-4 space-y-3">
+                <div className="text-xs font-semibold text-[#1F1B2C]">
+                  Holdout Prediction Comparison: Actual Sales vs Candidate Models
+                </div>
+                <div className="relative w-full h-64 bg-[#F5EFFF]/30 rounded-2xl border border-[#E5D9F2] p-4 flex flex-col justify-end">
+                  <svg viewBox="0 0 800 200" className="w-full h-full overflow-visible">
+                    {/* Grid */}
+                    {[0, 0.25, 0.5, 0.75, 1].map((r, i) => (
+                      <line key={i} x1="0" y1={200 - r * 170} x2="800" y2={200 - r * 170} stroke="#E5D9F2" strokeDasharray="3 3" />
+                    ))}
+
+                    {/* Actual holdout line */}
+                    <path
+                      d={testActuals.map((v, i) => {
+                        const x = (i / Math.max(1, testActuals.length - 1)) * 800;
+                        const y = 200 - (v / (chartMax || 1)) * 170;
+                        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                      }).join(' ')}
+                      fill="none"
+                      stroke="#1F1B2C"
+                      strokeWidth="3"
+                      strokeLinejoin="round"
+                    />
+
+                    {/* Model prediction lines */}
+                    {Object.entries(modelPredictions).map(([mKey, preds]) => {
+                      const isSelected = selectedModel?.toLowerCase() === mKey.toLowerCase();
+                      const color = modelColors[mKey] || modelColors[mKey.toLowerCase()] || '#A294F9';
+                      return (
+                        <path
+                          key={mKey}
+                          d={preds.map((v, i) => {
+                            const x = (i / Math.max(1, preds.length - 1)) * 800;
+                            const y = 200 - (v / (chartMax || 1)) * 170;
+                            return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                          }).join(' ')}
+                          fill="none"
+                          stroke={color}
+                          strokeWidth={isSelected ? '2.5' : '1.5'}
+                          strokeDasharray={mKey.toLowerCase() === 'arima' ? '4 2' : 'none'}
+                          strokeLinejoin="round"
+                          opacity={isSelected ? 1.0 : 0.6}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-[#5F5670] mt-2 pt-2 border-t border-[#E5D9F2]">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <span className="flex items-center gap-1.5 font-bold text-[#1F1B2C]">
+                        <span className="w-3.5 h-1 bg-[#1F1B2C] inline-block rounded-full"></span>
+                        Actual Holdout Sales
+                      </span>
+                      {Object.keys(modelPredictions).map(mKey => (
+                        <span key={mKey} className="flex items-center gap-1.5 font-medium">
+                          <span 
+                            className="w-3.5 h-1 inline-block rounded-full" 
+                            style={{ backgroundColor: modelColors[mKey] || modelColors[mKey.toLowerCase()] || '#A294F9' }} 
+                          />
+                          <span className="capitalize">{mKey}</span>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-[#8E83A3]">
+                      {testTimestamps[0]} → {testTimestamps[testTimestamps.length - 1]} ({testTimestamps.length} Days)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ========================================================================= */}
+      {/* SECTION 3: FUTURE FORECASTING (100% RETRAINING & FUTURE NUMBERS) */}
+      {/* ========================================================================= */}
+      <section className="p-6 sm:p-8 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F5EFFF]">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#A294F9]">
+              Step 3
+            </div>
+            <h2 className="text-xl font-bold font-heading text-[#1F1B2C]">
+              Future Forecasting (100% Historical Retraining)
+            </h2>
+            <p className="text-xs text-[#5F5670]">
+              Retrain your selected model on 100% of historical data and project into the future with uncertainty bounds.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExecuteFutureForecast}
+            disabled={isLoading || !backendOnline}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-[#A294F9] text-white text-xs font-bold hover:bg-[#9181f7] shadow-sm hover:shadow transition-all cursor-pointer shrink-0"
+          >
+            <Zap className="w-4 h-4" />
+            <span>Generate Future Forecast Now</span>
+          </button>
+        </div>
+
+        {/* Future Horizon & Model Selection Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Selected Model */}
+          <div className="p-4 rounded-2xl bg-[#F5EFFF] border border-[#CDC1FF] space-y-1">
+            <span className="text-[11px] font-bold uppercase text-[#8E83A3]">Selected Candidate Model:</span>
+            <div className="text-base font-bold text-[#1F1B2C] uppercase">{selectedModel}</div>
+            <p className="text-[11px] text-[#5F5670]">
+              Will be retrained on 100% of available historical observations.
+            </p>
+          </div>
+
+          {/* Horizon Selection */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[#1F1B2C]">
+              Future Horizon Window
+            </label>
+            <div className="grid grid-cols-4 gap-1 bg-[#F5EFFF] p-1 rounded-xl border border-[#CDC1FF]">
+              {[7, 14, 28, 90].map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  onClick={() => setLocalHorizon(days)}
+                  className={`py-2 text-center text-xs rounded-lg font-bold transition-all cursor-pointer ${
+                    localHorizon === days 
+                      ? 'bg-[#A294F9] text-white shadow-xs' 
+                      : 'text-[#5F5670] hover:text-[#1F1B2C]'
                   }`}
                 >
-                  <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                    isDone ? 'bg-[#A294F9] text-white' : isCurrent ? 'border-2 border-[#A294F9]' : 'border border-gray-300'
-                  }`}>
-                    {isDone && <Check className="w-2.5 h-2.5" />}
-                  </div>
-                  <span>{stepText}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* FORECAST RESULTS VIEW (Appears smoothly after generation) */}
-      {forecastResult && !isGenerating && (
-        <div className="space-y-6">
-          {/* Header Summary / Configuration Badges */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-white border border-[#E5D9F2] shadow-xs">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-[#1F1B2C]">Active Run:</span>
-              <span className="px-2.5 py-1 rounded-lg bg-[#F5EFFF] text-[#1F1B2C] border border-[#CDC1FF] font-medium">
-                Store: {forecastResult.store.name}
-              </span>
-              <span className="px-2.5 py-1 rounded-lg bg-[#F5EFFF] text-[#1F1B2C] border border-[#CDC1FF] font-medium">
-                Product: {forecastResult.product.id} ({forecastResult.product.name})
-              </span>
-              <span className="px-2.5 py-1 rounded-lg bg-[#E5D9F2] text-[#1F1B2C] border border-[#CDC1FF] font-semibold">
-                Model: {forecastResult.model.name}
-              </span>
+                  {days}D
+                </button>
+              ))}
             </div>
-
-            <button
-              onClick={() => {
-                setForecastResult(null);
-              }}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5F5670] hover:text-[#1F1B2C] px-3 py-1.5 rounded-xl border border-[#E5D9F2] bg-[#F5EFFF] transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Modify Selection</span>
-            </button>
-          </div>
-
-          {/* Top 4 Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-2xl bg-white border border-[#E5D9F2] shadow-xs space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#8E83A3]">
-                Forecast Horizon
-              </div>
-              <div className="text-2xl font-bold font-heading text-[#1F1B2C]">
-                {forecastResult.horizonDays} Days
-              </div>
-              <div className="text-xs text-[#5F5670]">
-                {forecastResult.horizonDays === 7 ? 'Short-term daily' : forecastResult.horizonDays === 28 ? 'Medium-term tactical' : 'Long-term strategic'}
-              </div>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-white border border-[#E5D9F2] shadow-xs space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#8E83A3]">
-                Total Forecasted Demand
-              </div>
-              <div className="text-2xl font-bold font-heading text-[#A294F9]">
-                {forecastResult.summary.totalDemand} <span className="text-xs font-normal text-[#5F5670]">units</span>
-              </div>
-              <div className="text-xs text-[#5F5670]">
-                Avg {forecastResult.summary.avgDailyDemand} units/day
-              </div>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-white border border-[#E5D9F2] shadow-xs space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#8E83A3]">
-                Backtested MAPE
-              </div>
-              <div className="text-2xl font-bold font-heading text-emerald-600">
-                {forecastResult.mape}%
-              </div>
-              <div className="text-xs text-[#5F5670]">
-                Mean Absolute Percentage Error
-              </div>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-white border border-[#E5D9F2] shadow-xs space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#8E83A3]">
-                Backtested RMSE
-              </div>
-              <div className="text-2xl font-bold font-heading text-[#1F1B2C]">
-                {forecastResult.rmse} <span className="text-xs font-normal text-[#5F5670]">units</span>
-              </div>
-              <div className="text-xs text-[#5F5670]">
-                Root Mean Squared Error
-              </div>
+            <div className="text-[11px] text-[#8E83A3]">
+              {localHorizon === 7 ? 'Short-term replenishment' : localHorizon === 14 ? 'Bi-weekly cycle' : localHorizon === 28 ? 'Monthly demand planning' : 'Quarterly supply strategy'}
             </div>
           </div>
 
-          {/* Main Chart Card with Easy Horizon Switching directly above */}
-          <div className="p-6 lg:p-8 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-bold font-heading text-[#1F1B2C]">
-                  Actual vs Forecast
-                </h3>
-                <p className="text-xs text-[#5F5670]">
-                  Seamless horizon switching: switch between 7D, 28D, and 90D horizons below without rerunning.
-                </p>
-              </div>
-            </div>
-
-            {/* Direct Horizon Switching Tabs & Interactive Chart */}
-            <ForecastChart
-              history={forecastResult.history}
-              forecast={forecastResult.forecast}
-              todayDate={forecastResult.todayDate}
-              horizonDays={forecastResult.horizonDays}
-              onHorizonChange={handleHorizonSwitch}
-              showHorizonSwitch={true}
-              storeName={forecastResult.store.id}
-              productName={forecastResult.product.name}
+          {/* Optional Current Inventory */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[#1F1B2C]">
+              On-Hand Inventory (Optional)
+            </label>
+            <input
+              type="number"
+              placeholder="e.g. 500 units"
+              value={localInventory}
+              onChange={(e) => setLocalInventory(e.target.value)}
+              className="w-full bg-[#F5EFFF] border border-[#CDC1FF] rounded-xl px-3 py-2 text-xs font-semibold text-[#1F1B2C] outline-none"
             />
-
-            {/* Forecast Summary Details Grid */}
-            <div className="pt-4 border-t border-[#F5EFFF] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-              <div className="p-3.5 rounded-xl bg-[#F5EFFF]/60 border border-[#E5D9F2]">
-                <div className="text-[#8E83A3]">Total Demand</div>
-                <div className="font-bold text-sm text-[#1F1B2C] mt-0.5">
-                  {forecastResult.summary.totalDemand} units
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#F5EFFF]/60 border border-[#E5D9F2]">
-                <div className="text-[#8E83A3]">Average Daily Demand</div>
-                <div className="font-bold text-sm text-[#1F1B2C] mt-0.5">
-                  {forecastResult.summary.avgDailyDemand} units / day
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#F5EFFF]/60 border border-[#E5D9F2]">
-                <div className="text-[#8E83A3]">Peak Forecast Day</div>
-                <div className="font-bold text-sm text-[#1F1B2C] mt-0.5">
-                  {forecastResult.summary.highestDay.units} units ({forecastResult.summary.highestDay.date})
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#F5EFFF]/60 border border-[#E5D9F2]">
-                <div className="text-[#8E83A3]">Trough Forecast Day</div>
-                <div className="font-bold text-sm text-[#1F1B2C] mt-0.5">
-                  {forecastResult.summary.lowestDay.units} units ({forecastResult.summary.lowestDay.date})
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Links */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 rounded-2xl bg-white border border-[#E5D9F2]">
-            <div className="text-xs text-[#5F5670]">
-              Want to see how this prediction compares against other models or how to use it for inventory?
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => onNavigate('comparison')}
-                className="px-4 py-2 rounded-xl bg-[#F5EFFF] text-[#1F1B2C] hover:bg-[#E5D9F2] border border-[#CDC1FF] text-xs font-semibold transition-colors"
-              >
-                Compare Models →
-              </button>
-              <button
-                onClick={() => onNavigate('insights')}
-                className="px-4 py-2 rounded-xl bg-[#A294F9] text-white hover:bg-[#9181f7] text-xs font-semibold transition-colors"
-              >
-                View Business Insights →
-              </button>
+            <div className="text-[11px] text-[#8E83A3]">
+              Used to calculate stockout risk and estimated stockout dates.
             </div>
           </div>
         </div>
-      )}
+
+        {/* FUTURE FORECAST RESULTS */}
+        {forecastResult && (
+          <div className="space-y-6 pt-4 border-t border-[#F5EFFF]">
+            {/* Top 4 Future KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] space-y-1">
+                <div className="text-[10px] font-bold uppercase text-[#8E83A3]">Total Projected Volume</div>
+                <div className="text-2xl font-bold font-heading text-[#A294F9]">
+                  {Math.round(forecastResult.insights.total_projected_volume).toLocaleString()} <span className="text-xs font-normal text-[#5F5670]">units</span>
+                </div>
+                <div className="text-[11px] text-[#5F5670]">
+                  Across {forecastResult.horizon} upcoming future days
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] space-y-1">
+                <div className="text-[10px] font-bold uppercase text-[#8E83A3]">Daily Average Demand</div>
+                <div className="text-2xl font-bold font-heading text-[#1F1B2C]">
+                  {forecastResult.insights.average_daily_demand.toFixed(1)} <span className="text-xs font-normal text-[#5F5670]">units/day</span>
+                </div>
+                <div className="text-[11px] text-emerald-600 capitalize font-medium">
+                  {forecastResult.insights.demand_trend} trend
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] space-y-1">
+                <div className="text-[10px] font-bold uppercase text-[#8E83A3]">Peak Demand Date</div>
+                <div className="text-xl font-bold font-heading text-[#1F1B2C]">
+                  {forecastResult.insights.peak_demand_value.toFixed(1)} <span className="text-xs font-normal text-[#5F5670]">units</span>
+                </div>
+                <div className="text-[11px] text-[#8E83A3]">
+                  Date: {forecastResult.insights.peak_demand_date}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] space-y-1">
+                <div className="text-[10px] font-bold uppercase text-[#8E83A3]">Recommended Safety Stock</div>
+                <div className="text-2xl font-bold font-heading text-emerald-700">
+                  {Math.round(forecastResult.insights.recommended_safety_stock)} <span className="text-xs font-normal text-[#5F5670]">units</span>
+                </div>
+                <div className="text-[11px] text-[#5F5670]">
+                  Uncertainty safety buffer
+                </div>
+              </div>
+            </div>
+
+            {/* Interactive Future Forecast Chart */}
+            <div className="space-y-3">
+              <div className="text-xs font-bold text-[#1F1B2C]">
+                100% Historical Data + Future Projections with 80% & 95% Confidence Intervals
+              </div>
+              <ForecastChart
+                history={chartHistory}
+                forecast={forecastResult.forecast}
+                horizonDays={forecastResult.horizon}
+                onHorizonChange={(days) => {
+                  setLocalHorizon(days);
+                  runFutureForecast(selectedModel, days, selectedSeriesId, localInventory).catch(() => {});
+                }}
+                showHorizonSwitch={true}
+                storeName={forecastResult.dataset_id}
+                productName={forecastResult.series_id}
+              />
+            </div>
+
+            {/* Future Numbers Table with CSV Download */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-[#1F1B2C]">
+                  Future Forecast Number Table ({forecastResult.horizon} Days)
+                </h4>
+
+                <button
+                  type="button"
+                  onClick={exportForecastToCsv}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#A294F9] text-white text-xs font-bold hover:bg-[#9181f7] shadow-xs cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Forecast CSV</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border border-[#E5D9F2] rounded-2xl max-h-72">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-[#F5EFFF] text-[#8E83A3] sticky top-0">
+                    <tr>
+                      <th className="py-2.5 px-4 font-semibold">Date</th>
+                      <th className="py-2.5 px-4 font-bold text-[#A294F9]">Point Prediction</th>
+                      <th className="py-2.5 px-4 font-semibold">80% Lower</th>
+                      <th className="py-2.5 px-4 font-semibold">80% Upper</th>
+                      <th className="py-2.5 px-4 font-semibold">95% Lower</th>
+                      <th className="py-2.5 px-4 font-semibold">95% Upper</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F5EFFF]">
+                    {forecastResult.forecast.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-[#F5EFFF]/30">
+                        <td className="py-2 px-4 font-medium text-[#1F1B2C]">{row.timestamp}</td>
+                        <td className="py-2 px-4 font-bold text-[#A294F9]">{row.prediction.toFixed(2)}</td>
+                        <td className="py-2 px-4 text-[#5F5670]">{row.lower_80.toFixed(2)}</td>
+                        <td className="py-2 px-4 text-[#5F5670]">{row.upper_80.toFixed(2)}</td>
+                        <td className="py-2 px-4 text-[#8E83A3]">{row.lower_95.toFixed(2)}</td>
+                        <td className="py-2 px-4 text-[#8E83A3]">{row.upper_95.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

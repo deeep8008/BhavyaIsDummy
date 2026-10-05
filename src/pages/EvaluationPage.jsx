@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   CheckCircle2, 
-  HelpCircle, 
   RotateCw, 
   TrendingUp, 
   ShieldCheck, 
@@ -9,31 +8,41 @@ import {
   Info,
   Calendar,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Scissors
 } from 'lucide-react';
-import { BACKTESTING_FOLDS, BENCHMARK_METRICS } from '../data/mockData';
+import { useDataset } from '../context/DatasetContext';
 
-export default function EvaluationPage() {
-  const [activeMetricDetail, setActiveMetricDetail] = useState('mape');
+export default function EvaluationPage({ onNavigate }) {
+  const { 
+    datasetSummary, 
+    splitMetadata, 
+    benchmarkResults, 
+    selectedModel,
+    activeDatasetId 
+  } = useDataset();
+
+  const splitInfo = benchmarkResults?.split_info || splitMetadata;
+  const bestModel = benchmarkResults?.leaderboard?.[0];
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-12">
       {/* Header */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider text-[#8E83A3]">
-          Methodological Rigor
+          Methodological Integrity (Phase 3)
         </div>
         <h1 className="text-3xl font-bold font-heading text-[#1F1B2C]">
-          Evaluation & Backtesting
+          Evaluation & Backtesting Standards
         </h1>
         <p className="text-sm text-[#5F5670] mt-1 max-w-2xl">
-          Understanding model accuracy, temporal out-of-sample backtesting, and performance degradation across 7-day, 28-day, and 90-day forecasting windows.
+          Understanding our chronological out-of-sample backtesting methodology, zero data-leakage boundaries, and robust metric calculations.
         </p>
       </div>
 
-      {/* Human-Friendly Metric Explanations (No math jargon) */}
+      {/* Metric Explanations */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Metric 1: MAPE */}
+        {/* Metric 1: Safe MAPE */}
         <div className="p-6 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -41,30 +50,32 @@ export default function EvaluationPage() {
                 %
               </span>
               <h2 className="text-lg font-bold font-heading text-[#1F1B2C]">
-                MAPE (Mean Absolute Percentage Error)
+                Zero-Target Safe MAPE
               </h2>
             </div>
             <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
-              Relative Metric
+              Primary Leaderboard Metric
             </span>
           </div>
 
           <p className="text-xs text-[#5F5670] leading-relaxed">
-            <strong>What it tells a planner:</strong> "On average, by what percentage did our predicted demand deviate from the actual units sold?"
+            <strong>What it tells a planner:</strong> "On average, by what percentage did our predicted demand deviate from actual sales?"
           </p>
 
-          <div className="p-3.5 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] text-xs space-y-1.5">
+          <div className="p-3.5 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] text-xs space-y-2">
             <div className="flex justify-between">
-              <span className="text-[#5F5670]">Typical M5 Retail Target:</span>
-              <span className="font-semibold text-[#1F1B2C]">&lt; 15% Error</span>
+              <span className="text-[#5F5670]">Mathematical Formula:</span>
+              <span className="font-mono text-[#1F1B2C] text-[11px]">MAPE = (100 / N) * Σ |(y - ŷ) / y|</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#5F5670]">Best Short-term (7D) Achieved:</span>
-              <span className="font-semibold text-[#A294F9]">8.7% (TFT Architecture)</span>
+              <span className="text-[#5F5670]">Zero-Division Safety:</span>
+              <span className="font-semibold text-emerald-700">Zero actuals masked (actual != 0); if actual=0 and pred=0, error is 0%</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#5F5670]">Key Advantage:</span>
-              <span className="font-medium text-[#1F1B2C]">Scale-independent; easy to explain to executive leadership.</span>
+              <span className="text-[#5F5670]">Top Model Achieved:</span>
+              <span className="font-bold text-[#A294F9]">
+                {bestModel ? `${bestModel.mape.toFixed(2)}% (${bestModel.model_name})` : 'Run Benchmark'}
+              </span>
             </div>
           </div>
         </div>
@@ -77,169 +88,126 @@ export default function EvaluationPage() {
                 #
               </span>
               <h2 className="text-lg font-bold font-heading text-[#1F1B2C]">
-                RMSE (Root Mean Squared Error)
+                Root Mean Squared Error (RMSE)
               </h2>
             </div>
             <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-[#E5D9F2] text-[#A294F9] font-semibold">
-              Magnitude Metric
+              Secondary Tie-Breaker
             </span>
           </div>
 
           <p className="text-xs text-[#5F5670] leading-relaxed">
-            <strong>What it tells a planner:</strong> "In absolute product units, how far off are predictions, giving extra weight to large surprising misforecasts?"
+            <strong>What it tells a planner:</strong> "In absolute units of inventory, how far off are predictions, giving exponential weight to extreme misforecasts?"
           </p>
 
-          <div className="p-3.5 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] text-xs space-y-1.5">
+          <div className="p-3.5 rounded-2xl bg-[#F5EFFF]/70 border border-[#E5D9F2] text-xs space-y-2">
             <div className="flex justify-between">
-              <span className="text-[#5F5670]">Unit Measurement:</span>
-              <span className="font-semibold text-[#1F1B2C]">Cases / Pieces Sold</span>
+              <span className="text-[#5F5670]">Mathematical Formula:</span>
+              <span className="font-mono text-[#1F1B2C] text-[11px]">RMSE = sqrt( (1 / N) * Σ (y - ŷ)² )</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#5F5670]">Best Short-term (7D) Achieved:</span>
-              <span className="font-semibold text-[#A294F9]">7.9 Units (TFT)</span>
+              <span className="text-[#5F5670]">Unit of Measure:</span>
+              <span className="font-semibold text-[#1F1B2C]">Cases / Product Units</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#5F5670]">Key Advantage:</span>
-              <span className="font-medium text-[#1F1B2C]">Heavily penalizes massive stockouts and costly overstocks.</span>
+              <span className="text-[#5F5670]">Top Model RMSE:</span>
+              <span className="font-bold text-[#1F1B2C]">
+                {bestModel ? `${bestModel.rmse.toFixed(2)} units` : 'Run Benchmark'}
+              </span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Section C: Backtesting Rolling Window Workflow */}
+      {/* Section C: Strict Chronological Split */}
       <section className="p-6 lg:p-8 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-6">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-[#8E83A3]">
             Section C
           </div>
           <h2 className="text-xl font-bold font-heading text-[#1F1B2C]">
-            Walk-Forward Rolling Window Backtesting
+            Chronological Validation (Zero Data Leakage Guarantee)
           </h2>
           <p className="text-xs text-[#5F5670]">
-            Time-series data cannot be shuffled randomly. We simulate real enterprise operational conditions using chronological sliding windows across multiple historical folds.
+            Time-series data cannot be randomly shuffled or cross-validated with standard k-fold. The test window is strictly after the training window in time (chronological order preserved).
           </p>
         </div>
 
         {/* Visual Walkthrough Diagram */}
         <div className="p-5 rounded-2xl bg-[#F5EFFF]/50 border border-[#E5D9F2] space-y-4">
-          <div className="text-xs font-semibold text-[#1F1B2C] flex items-center gap-2">
-            <RotateCw className="w-4 h-4 text-[#A294F9]" />
-            <span>Chronological Validation Strategy</span>
+          <div className="text-xs font-semibold text-[#1F1B2C] flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <RotateCw className="w-4 h-4 text-[#A294F9]" />
+              <span>Current Split Boundary Parameters</span>
+            </span>
+            <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-white text-[#A294F9] border border-[#CDC1FF] font-bold">
+              Dataset: {activeDatasetId}
+            </span>
           </div>
 
-          {/* Fold Steps Visual */}
-          <div className="space-y-3">
-            {[
-              { fold: 'Fold 1', trainPct: '70%', testPct: '10%', trainDays: 'Days 1–1773', testDays: 'Days 1774–1801 (28D)' },
-              { fold: 'Fold 2', trainPct: '75%', testPct: '10%', trainDays: 'Days 1–1801', testDays: 'Days 1802–1829 (28D)' },
-              { fold: 'Fold 3', trainPct: '80%', testPct: '10%', trainDays: 'Days 1–1829', testDays: 'Days 1830–1857 (28D)' },
-              { fold: 'Fold 4 (Current)', trainPct: '85%', testPct: '15%', trainDays: 'Days 1–1885', testDays: 'Days 1886–1913 (28D Test)' }
-            ].map((f, i) => (
-              <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-xl bg-white border border-[#E5D9F2] text-xs">
-                <div className="w-28 font-bold text-[#1F1B2C] shrink-0">{f.fold}</div>
-                
-                {/* Visual bar split */}
-                <div className="w-full flex h-5 rounded-lg overflow-hidden border border-[#CDC1FF]">
-                  <div 
-                    className="bg-[#E5D9F2] flex items-center justify-center text-[10px] text-[#5F5670] font-medium"
-                    style={{ width: f.trainPct }}
-                  >
-                    Historical Training ({f.trainDays})
-                  </div>
-                  <div 
-                    className="bg-[#A294F9] flex items-center justify-center text-[10px] text-white font-bold"
-                    style={{ width: f.testPct }}
-                  >
-                    Test ({f.testDays})
-                  </div>
-                </div>
+          {/* Active Split Metadata Display */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 rounded-xl bg-white border border-[#E5D9F2]">
+              <div className="text-[#8E83A3] text-[10px] font-bold uppercase">Train Observations</div>
+              <div className="font-bold text-base text-[#1F1B2C] mt-0.5">
+                {splitInfo?.train_observations ? splitInfo.train_observations.toLocaleString() : '80%'}
               </div>
-            ))}
+            </div>
+
+            <div className="p-3 rounded-xl bg-white border border-[#E5D9F2]">
+              <div className="text-[#8E83A3] text-[10px] font-bold uppercase">Hidden Test Observations</div>
+              <div className="font-bold text-base text-[#A294F9] mt-0.5">
+                {splitInfo?.test_observations ? splitInfo.test_observations.toLocaleString() : '20%'}
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-white border border-[#E5D9F2]">
+              <div className="text-[#8E83A3] text-[10px] font-bold uppercase">Training Time Window</div>
+              <div className="font-bold text-xs text-[#1F1B2C] mt-1 truncate">
+                {splitInfo?.train_window ? `${splitInfo.train_window.start} → ${splitInfo.train_window.end}` : 'First 80% History'}
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-white border border-[#E5D9F2]">
+              <div className="text-[#8E83A3] text-[10px] font-bold uppercase">Hidden Test Window</div>
+              <div className="font-bold text-xs text-emerald-600 mt-1 truncate">
+                {splitInfo?.test_window ? `${splitInfo.test_window.start} → ${splitInfo.test_window.end}` : 'Latest 20% Holdout'}
+              </div>
+            </div>
+          </div>
+
+          {/* Visual bar split */}
+          <div className="w-full flex h-6 rounded-xl overflow-hidden border border-[#CDC1FF] text-[10px] font-bold">
+            <div className="bg-[#E5D9F2] text-[#5F5670] flex items-center justify-center w-[80%]">
+              Model Training Period (80%)
+            </div>
+            <div className="bg-[#A294F9] text-white flex items-center justify-center w-[20%]">
+              Hidden Test Holdout (20%)
+            </div>
           </div>
 
           <div className="text-[11px] text-[#8E83A3] pt-1">
-            * This methodology guarantees zero data leakage: models never observe future calendar, holiday, or price events during training.
+            * Strict rule: Target values in the test window are never passed to <code className="text-[#A294F9]">model.fit()</code> during benchmark evaluation.
           </div>
-        </div>
-
-        {/* Backtesting Folds Result Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-[#E5D9F2] text-[#8E83A3] uppercase tracking-wider">
-                <th className="py-3 px-4 font-semibold">Validation Window</th>
-                <th className="py-3 px-4 font-semibold">Training Range</th>
-                <th className="py-3 px-4 font-semibold">Unseen Test Duration</th>
-                <th className="py-3 px-4 font-semibold">Top Performing Architecture</th>
-                <th className="py-3 px-4 font-semibold">Window MAPE</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#F5EFFF]">
-              {BACKTESTING_FOLDS.map((f, i) => (
-                <tr key={i} className="hover:bg-[#F5EFFF]/40 transition-colors">
-                  <td className="py-3 px-4 font-bold text-[#1F1B2C]">{f.fold}</td>
-                  <td className="py-3 px-4 text-[#5F5670]">{f.trainPeriod}</td>
-                  <td className="py-3 px-4 text-[#1F1B2C]">{f.testDays} Days Out-of-Sample</td>
-                  <td className="py-3 px-4 font-semibold text-[#A294F9]">{f.bestModel}</td>
-                  <td className="py-3 px-4 font-semibold text-emerald-600">{f.avgMape}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </section>
 
-      {/* Section D: Horizon Consistency Check */}
-      <section className="p-6 rounded-3xl bg-white border border-[#E5D9F2] shadow-xs space-y-4">
+      {/* Direct Nav to Benchmark */}
+      <section className="p-6 rounded-2xl bg-white border border-[#E5D9F2] flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#8E83A3]">
-            Section D
+          <div className="font-bold text-base text-[#1F1B2C]">
+            Ready to view the live benchmark results?
           </div>
-          <h2 className="text-xl font-bold font-heading text-[#1F1B2C]">
-            Horizon Consistency Matrix (Short vs Medium vs Long)
-          </h2>
-          <p className="text-xs text-[#5F5670]">
-            Comparing how each model degrades as predictions step further into the future.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-          <div className="p-5 rounded-2xl bg-[#F5EFFF] border border-[#CDC1FF] space-y-2">
-            <span className="text-xs font-bold text-[#A294F9] uppercase tracking-wider">
-              Short Horizon (7 Days)
-            </span>
-            <div className="text-sm font-semibold text-[#1F1B2C]">
-              Operational Day-to-Day Stability
-            </div>
-            <p className="text-xs text-[#5F5670] leading-relaxed">
-              Tree-based models (LightGBM) and deep attention (TFT) lead with &lt; 10.5% MAPE. Immediate lags from t-1 and t-7 provide exceptional predictive certainty.
-            </p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-[#F5EFFF] border border-[#CDC1FF] space-y-2">
-            <span className="text-xs font-bold text-[#A294F9] uppercase tracking-wider">
-              Medium Horizon (28 Days)
-            </span>
-            <div className="text-sm font-semibold text-[#1F1B2C]">
-              Tactical Monthly Planning
-            </div>
-            <p className="text-xs text-[#5F5670] leading-relaxed">
-              Prophet and TFT remain resilient by capturing recurring monthly payday and SNAP benefits. Autoregressive statistical models (ARIMA) begin accumulating recursive drift.
-            </p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-[#F5EFFF] border border-[#CDC1FF] space-y-2">
-            <span className="text-xs font-bold text-[#A294F9] uppercase tracking-wider">
-              Long Horizon (90 Days)
-            </span>
-            <div className="text-sm font-semibold text-[#1F1B2C]">
-              Strategic Quarterly Outlook
-            </div>
-            <p className="text-xs text-[#5F5670] leading-relaxed">
-              Only multi-horizon deep architectures (TFT & DeepAR) maintain error below 14% MAPE due to specialized gating mechanisms that prevent multi-step error accumulation.
-            </p>
+          <div className="text-xs text-[#5F5670]">
+            Review dynamic rankings and inspect model predictions overlaid against actuals.
           </div>
         </div>
+        <button
+          onClick={() => onNavigate ? onNavigate('comparison') : null}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#A294F9] text-white text-xs font-semibold hover:bg-[#9181f7] shadow-xs transition-colors shrink-0 cursor-pointer"
+        >
+          <span>View Model Leaderboard →</span>
+        </button>
       </section>
     </div>
   );
