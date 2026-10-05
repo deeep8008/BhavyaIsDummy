@@ -1,77 +1,123 @@
-# ForecastIQ — Multi-Horizon Time-Series Forecasting Frontend
+# ForecastIQ — Multi-Horizon Demand Forecasting & Model Evaluation Engine
 
-A modern, human-friendly AI analytics web interface for **Multi-Horizon Time-Series Forecasting for Enterprise Analytics**.
-
-Built using **Vite, React 19, Tailwind CSS v4, Lucide Icons, and custom SVG time-series visualizers**.
+ForecastIQ is a full-stack, enterprise-grade demand forecasting platform that automates dataset ingestion, chronological 80/20 holdout backtesting across 5 candidate machine learning models, dynamic leaderboard ranking (MAPE & RMSE), and 100% historical retraining for future multi-horizon projections.
 
 ---
 
-## 🎨 Visual Identity & Lavender Palette
-The interface strictly adheres to the requested palette tokens:
-- **`#F5EFFF`** — Background page & subtle container tint (Very light lavender)
-- **`#E5D9F2`** — Soft lavender for confidence interval shading, borders, and secondary controls
-- **`#CDC1FF`** — Medium lavender for badges, boundary outlines, and active tags
-- **`#A294F9`** — Primary purple for primary CTAs, forecast trajectory lines, and active states
-- **`#FFFFFF`** — Surface cards with soft rounded corners (`12px–24px`) and thin borders
+## ⚡ Quick Start: Running Locally
 
-Status colors are subtle and purposeful:
-- 🟢 **Green (`#10B981`)** for healthy validation & dataset loaded status
-- 🟡 **Amber (`#F59E0B`)** for strategic quarterly warnings
-- 🔴 **Red (`#EF4444`)** for critical stockout / large error alerts
+Follow these steps to run both the **FastAPI Backend** and the **React Frontend** on your machine.
+
+### Prerequisites
+- **Python 3.10+** (with `pip`)
+- **Node.js 18+** (with `npm`)
+- **Git**
 
 ---
 
-## 🧭 Page Architecture & User Journey
-1. **Home (`Overview`)**:
-   - Multi-horizon Hero ("See what demand looks like next.")
-   - 4 Clean KPI cards (7D/28D/90D Horizons, 5 Models, 42,840 Series, MAPE & RMSE)
-   - Interactive *Actual vs Forecast* chart with store, product, model, and horizon controls
-   - Plain-language *"What changed?"* driver cards (Seasonal pattern, Calendar/SNAP events, Price elasticity)
-2. **Data Explorer**:
-   - Hierarchical filtering: State → Store → Category → Product → Date Window
-   - Section A: Historical Sales Trend with 7-Day Rolling Moving Average toggle
-   - Section B: Sales by Store comparison
-   - Section C: Sales by Category distribution
-   - Section D: Shelf price movement and discount spikes
-   - Section E: Calendar & External Event Timeline (SNAP, SuperBowl, Easter)
-   - Section F: Series Summary card
-3. **Generate Forecast & Forecast Results**:
-   - 4-Step Selection: Store → Product → 3 Large Horizon Cards (7D, 28D, 90D) → Model Architecture
-   - Sequential progress simulation:
-     - *Preparing data...*
-     - *Preparing forecasting features...*
-     - *Generating forecast...*
-     - *Preparing results...*
-   - Results view with top summary metrics (Horizon, Forecasted Demand, MAPE, RMSE)
-   - Direct horizon tabs (`[7 Days]` `[28 Days]` `[90 Days]`) above the chart for smooth switching without restarting
-4. **Model Comparison**:
-   - Objective comparison of **ARIMA / SARIMA, Prophet, LightGBM, DeepAR, and TFT**
-   - Metric Table 1: 7D, 28D, 90D MAPE (Percentage Error)
-   - Metric Table 2: 7D, 28D, 90D RMSE (Magnitude Error)
-   - Grouped visual bar charts comparing error across models
-   - Horizon consistency degradation curves
-5. **Evaluation & Backtesting**:
-   - Plain-language tooltips explaining MAPE and RMSE without complex math jargon
-   - Walk-forward chronological rolling window backtesting visual (Folds 1 to 5)
-   - Horizon consistency analysis (Short vs Medium vs Long stability)
-6. **Business Insights**:
-   - Advisory decision support for store and supply chain planners:
-     - Demand Outlook
-     - Inventory Planning (Safety buffers, reorder points, stockout risk)
-     - Staffing Planning (Shift allocations, weekend workload surges)
-     - Strategic 90-Day Planning (Lead-time windows, DC pallet bay allocation)
-
----
-
-## 🚀 Running the Frontend
-The development server is currently running at:
-```
-http://localhost:5173/
+### 1. Clone the Repository
+```bash
+git clone https://github.com/deeep8008/BhavyaIsDummy.git
+cd BhavyaIsDummy
 ```
 
-To run manually at any time:
-```powershell
-cd "c:\Major Project\frontend"
+---
+
+### 2. Start the Backend (Terminal 1)
+
+The backend powers the data processing, chronological holdout splitter, and 5 ML model algorithms.
+
+```bash
+# Navigate to backend directory
+cd backend
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start FastAPI server on port 8000
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+> ✅ **Backend will be live at:** `http://127.0.0.1:8000`  
+> 📖 **Interactive Swagger API Docs:** `http://127.0.0.1:8000/docs`
+
+---
+
+### 3. Start the Frontend (Terminal 2)
+
+Open a **new separate terminal** in the root project folder:
+
+```bash
+# In the root repository directory
+npm install
+
+# Start Vite dev server
 npm run dev
 ```
-Or double-click `start_frontend.bat` in the project root.
+
+> 🌐 **Frontend will be live at:** `http://localhost:5173/`
+
+---
+
+## 🔄 How the Application Works (3-Step Pipeline)
+
+```
+[Upload CSV / Folder / 1-Click M5]
+               │
+               ▼
+[Standardize to Canonical Schema (Timestamp, Target, Series ID)]
+               │
+               ▼
+[80/20 Chronological Split: 80% Train, 20% Hidden Holdout]
+               │
+               ▼
+[Evaluate 5 Models: ARIMA, Prophet, LightGBM, DeepAR, TFT]
+               │
+               ▼
+[Leaderboard Ranking (Primary: MAPE %, Secondary: RMSE)]
+               │
+               ▼
+[Select Champion Model -> 100% Historical Retraining]
+               │
+               ▼
+[Future Projections (7D/14D/28D/90D) + Safety Stock + CSV Export]
+```
+
+### 1. Dataset Ingestion & Preloading
+- **Single CSV or Multi-CSV Folder**: Drag-and-drop your sales time-series data with automatic CSV validation.
+- **1-Click M5 Benchmark**: Instant preloading of the standard Walmart M5 benchmark dataset.
+- **Column Mapping**: Interactive schema mapper to designate Date (`timestamp`), Sales (`target`), and Product/Store ID (`series_id`).
+
+### 2. Chronological Backtesting & Dynamic Leaderboard
+- **Zero Data Leakage**: Strictly splits data chronologically (first 80% for training, last 20% strictly hidden).
+- **5 Candidate ML Models**: Trains **ARIMA**, **Prophet**, **LightGBM**, **DeepAR**, and **TFT** strictly on the 80% training window.
+- **True Metrics**: Predicts the hidden 20 days and computes real **MAPE** (Mean Absolute Percentage Error) and **RMSE** (Root Mean Squared Error) against actual sales ground truth.
+- **Dynamic Leaderboard**: Automatically ranks models from 1st to 5th (lower error is better, champion marked 🏆).
+- **Interactive Holdout Chart**: Visually overlays actual sales against model predictions.
+
+### 3. Future Forecasting (100% Historical Retraining)
+- **100% History Fit**: Retrains the selected winning model on all historical observations so recent demand trends are captured.
+- **Multi-Horizon Projection**: Forecasts ahead by **7D, 14D, 28D, or 90D**.
+- **Confidence Intervals**: Computes 80% and 95% uncertainty cones.
+- **Supply Chain Insights**: Recommends safety stock buffers, peak demand dates, and stockout risk estimates based on on-hand warehouse inventory.
+- **1-Click CSV Export**: Downloads complete future numbers for supply chain and ERP systems.
+
+---
+
+## 🛠 Tech Stack
+
+- **Frontend**: React 19, Vite, Tailwind CSS v4, Lucide Icons, Custom SVG Time-Series Charts.
+- **Backend**: FastAPI, Uvicorn, Pydantic v2, Pandas, NumPy, PyArrow.
+- **Machine Learning**: LightGBM, Prophet, Statsmodels (ARIMA/SARIMAX), Scikit-Learn, PyTorch.
+- **Storage**: Canonical Parquet engine with fast local caching.
+
+---
+
+## 🧪 Running Backend Unit Tests
+
+To verify all backend phases and model pipelines:
+
+```bash
+cd backend
+python -m pytest test_phase1.py test_phase2.py test_phase3.py test_phase4.py -v
+```
